@@ -1,103 +1,215 @@
-# Going live (free): Vercel + MongoDB Atlas
+# Deploy the web app to Vercel
 
-The app is ready to deploy. This is the step-by-step list for the day the farm goes online. Every step runs on free plans. About 1 to 1.5 hours in total; the owner's part is about 15 minutes (step 1).
+This repository is an npm-workspaces monorepo. Deploy the Next.js web app from
+`apps/web`; it depends on shared packages in the repository root. The Vercel
+configuration at `apps/web/vercel.json` selects Next.js and schedules the
+daily cleanup job.
 
-Nothing here has been done yet. The live data is still in the local database on the office PC (`C:\Users\hp\farm-data\mongo-data`).
+## 1. Check the project before deploying
 
-## 0. Before you start
-- [ ] On the office PC, start the local database: `apps/web/scripts/start-local-db.ps1`.
-- [ ] Back up the local database (keep the file somewhere safe), or use **Settings → Data & sync → Download backup** in the app.
-- [ ] Check that `main` builds: `npm ci && npx turbo run typecheck lint test` and `cd apps/web && npx next build`.
-
-## 1. MongoDB Atlas (owner, in the Atlas website)
-Use the free **M0** cluster (`cluster0`, database `farm_management`). It is empty today.
-
-1. **Database Access → Add New Database User**
-   - Username: `farm-app`. Password: generated, 24 or more characters. Save it in a password manager.
-   - Role: **Read and write to any database**, or better, a custom role limited to `farm_management`.
-2. **Network Access → Add IP Address → `0.0.0.0/0`.** Vercel has no fixed IP addresses, so this is required. The strong password above is what protects the database.
-3. Copy the connection string and add the database name and pool size:
-   `mongodb+srv://farm-app:<password>@cluster0.uzbxx1c.mongodb.net/farm_management?retryWrites=true&w=majority&maxPoolSize=5`
-   - `maxPoolSize=5` stops serverless functions from using up M0's connection limit.
-
-## 2. Prepare the Atlas database (from the office PC)
-Run these in `apps/web`. Never commit the connection string or paste it into chat.
+From the repository root, run:
 
 ```bash
-# 1) Create the collections and indexes from prisma/schema.prisma
-DATABASE_URL="<atlas url>" npx prisma db push --skip-generate
-
-# 2) Expiry (TTL) indexes for tokens, rate limits and old imports, plus the
-#    googleId fix (Prisma makes it a plain unique index, which breaks every
-#    email-only user after the first; this makes it partial). Safe to re-run.
-#    Run it again after any later `prisma db push`.
-DATABASE_URL="<atlas url>" node scripts/db-indexes.mjs
-
-# 3) Copy the real farm (dry run first, then copy and verify)
-TARGET_DATABASE_URL="<atlas url>" node scripts/copy-to-atlas.mjs
-TARGET_DATABASE_URL="<atlas url>" node scripts/copy-to-atlas.mjs --apply
-#    → must end with "COPIED AND VERIFIED: every count and money total matches."
+npm ci
+npm run typecheck
+npm run lint
+npm run test
+npm run build --workspace=apps/web
 ```
 
-How `copy-to-atlas.mjs` works:
-- It keeps every id, so all links between records stay correct.
-- Logins and password hashes are copied, so everyone keeps their password. Sessions are not copied, so everyone signs in once more.
-- It refuses to copy into a database that already has farms.
-- It was tested on 2026-10-20 against a scratch copy: counts, money totals, photo bytes, password hashes and dates were all identical.
+Fix any failures before continuing. Do not commit real environment files,
+database credentials, or generated secrets. The root `.gitignore` excludes
+`.env` files while allowing `.env.example` templates.
 
-## 3. Vercel project (free Hobby plan, account `fahadfahim13`)
-The GitHub repo belongs to another account and this login can only read it. So either deploy from the office PC with the Vercel CLI (`npx vercel`), or have the repo owner connect it.
+## 2. Create a production MongoDB database
 
-- **Root Directory:** `apps/web`. Turn on "Include files outside the root directory", because the app uses `packages/*`.
-- **Framework:** Next.js. **Node.js:** 22.x.
-- **Install / Build:** use the defaults. npm workspaces are detected, `postinstall` runs `prisma generate`, and the build is `next build`.
-- **Environment variables** (Production). Names are in `apps/web/.env.example`:
+1. Create a MongoDB Atlas cluster and a database user for this app. Use a
+   unique, strong password and grant only the database permissions the app
+   needs.
+2. In Atlas **Network Access**, allow connections from Vercel. Vercel's
+   standard Hobby deployments do not have a fixed outbound IP; if you use
+   Atlas's `0.0.0.0/0` allowlist entry, restrict the database user as above and
+   keep its credentials private.
+3. Copy the Atlas connection string. Select the `farm_management` database and
+   include `maxPoolSize=5`, for example:
 
-| Name | Value |
+   ```text
+   mongodb+srv://<user>:<password>@<cluster-host>/farm_management?retryWrites=true&w=majority&maxPoolSize=5
+   ```
+
+   URL-encode special characters in the username or password. Never put the
+   real connection string in Git, a public issue, or a chat message.
+4. Create a local `apps/web/.env` from `apps/web/.env.example` and put the Atlas
+   connection string in `DATABASE_URL`. This file is ignored by Git.
+5. From the repository root, create the database collections and indexes:
+
+   ```bash
+   npm exec --workspace=apps/web -- prisma db push
+   node apps/web/scripts/db-indexes.mjs
+   ```
+
+   The index script is safe to rerun. Do not run these commands against a
+   production database containing data you need to preserve without first
+   making a backup.
+
+### If you have existing farm data to move
+
+Back up the source database first and keep it running until the move is
+verified. Set `TARGET_DATABASE_URL` in your local terminal to the Atlas URL,
+then run the copy script from the repository root:
+
+```bash
+# Dry run: inspect the records and totals that would be copied.
+node apps/web/scripts/copy-to-atlas.mjs
+
+# Copy, then verify record counts and money totals.
+node apps/web/scripts/copy-to-atlas.mjs --apply
+
+# Run the required Atlas indexes after the copy.
+node apps/web/scripts/db-indexes.mjs
+
+# Optional independent verification.
+node apps/web/scripts/copy-to-atlas.mjs --verify
+```
+
+In PowerShell, set the target without putting the URL into a committed file:
+
+```powershell
+$env:TARGET_DATABASE_URL = "mongodb+srv://..."
+```
+
+The copy script uses the local database as its default source. Check its output
+and confirm that the target is the intended, empty production database before
+using `--apply`.
+
+## 3. Import the GitHub repository into Vercel
+
+1. Sign in at [vercel.com](https://vercel.com/) and choose **Add New → Project**.
+2. Connect GitHub and import `Nabil-Ahamad-Rifat/Farmo`. If it is not listed,
+   authorize the Vercel GitHub app to access that repository.
+3. In **Configure Project**, set:
+   - **Root Directory:** `apps/web`
+   - **Include files outside the Root Directory:** enabled, so the build can
+     access the root npm workspace files and `packages/*`.
+   - **Framework Preset:** Next.js
+   - **Node.js Version:** 22.x
+   - **Build Command**, **Output Directory**, and **Install Command:** use the
+     detected defaults.
+4. Add the production environment variables in the next section before the
+   first production deployment.
+
+The `rootDirectory` setting is a Vercel project setting, not a supported
+`vercel.json` property. Keep `apps/web` as the Vercel project root so Vercel
+uses `apps/web/vercel.json` and its cron configuration.
+
+## 4. Add Vercel environment variables
+
+In the Vercel project, open **Settings → Environment Variables**. Add the
+following to **Production** (and to Preview only if you configure a separate
+test database there):
+
+| Variable | Value |
 |---|---|
-| `DATABASE_URL` | the Atlas URL from step 1, with `maxPoolSize=5` |
-| `JWT_SECRET` | **a new one** (`node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"`); don't reuse the local one |
-| `NEXT_PUBLIC_APP_URL` | `https://<project>.vercel.app` (no trailing slash) |
-| `CRON_SECRET` | 32+ random characters (`randomBytes(24).toString('hex')`) |
-| `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | optional: Gmail address, app password and sender name, for "Forgot password" emails |
-| `TRUST_CLOUDFLARE` | leave blank (no Cloudflare yet) |
-| `MOBILE_*` | optional, the defaults are fine |
+| `DATABASE_URL` | Production Atlas connection string from step 2 |
+| `JWT_SECRET` | A new random secret, at least 32 characters |
+| `NEXT_PUBLIC_APP_URL` | The production URL, such as `https://your-project.vercel.app`, without a trailing slash |
+| `CRON_SECRET` | A new random secret, at least 16 characters |
 
-- **Cron:** `apps/web/vercel.json` runs `/api/cron/cleanup` daily at 21:30 UTC (03:30 in Bangladesh). Vercel sends `CRON_SECRET` with it.
-- **Firewall** (Project → Firewall, free):
-  - turn on Bot protection;
-  - keep Attack Challenge Mode ready, to switch on if attacked;
-  - add a rule that denies request methods other than GET, POST, PUT and DELETE.
-  The app's own rate limits cover sign-in and sign-up.
+Generate secrets locally with Node.js; use a different secret for each
+variable:
 
-## 4. Check the live site
-- [ ] `https://<project>.vercel.app/api/meta/version` returns JSON.
-- [ ] Sign in as the owner; the dashboard totals match the local app.
-- [ ] Revenue Portal for this month matches the local numbers.
-- [ ] Animal photos load.
-- [ ] Settings → Data & sync: the storage meter shows, and Download backup works.
-- [ ] A manager sees no money pages.
-- [ ] Sign in with a wrong password 10 times: you get blocked ("Too many attempts").
-- [ ] Response headers include `Strict-Transport-Security` and `Content-Security-Policy`.
-- [ ] Optional: free OWASP ZAP baseline scan, `docker run -t ghcr.io/zaproxy/zaproxy:stable zap-baseline.py -t https://<project>.vercel.app`.
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"
+node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"
+```
 
-## 5. Phone app
-- Set `EXPO_PUBLIC_API_URL=https://<project>.vercel.app` in `apps/mobile/.env`, and in the `preview` and `production` profiles of `apps/mobile/eas.json` (they still say `https://REPLACE_WITH_PRODUCTION_URL`).
-- Test with Expo Go over **mobile data** (not WiFi): sign in, add a sale, see it on the web within a minute. Then turn on airplane mode, add an expense, turn it off, and it uploads once.
-- Installable APK (later): create a free Expo account, then run `npx eas login` and `npx eas build -p android --profile preview`.
+Add the final Vercel production URL to `NEXT_PUBLIC_APP_URL` once the project
+URL is known. Optional variables such as Google OAuth and email/SMTP are
+documented in `apps/web/.env.example`; add them only if you configure those
+services. Leave `TRUST_CLOUDFLARE` unset unless Cloudflare actually proxies the
+site.
 
-## 6. After going live
-- The local database becomes a backup: stop entering data on the office PC.
-- Download a backup from Settings about once a month and keep it off the phone and PC (e.g. Google Drive).
-- Watch the storage meter. Atlas M0 is 512 MB, and photos are the main use (about 70 KB each).
-- GitHub repo owner: merge the branch and turn on Dependabot alerts and CodeQL (Settings → Code security).
+Set these values only in Vercel's environment-variable settings or in your
+ignored local `.env` file. Do not prefix secrets with `NEXT_PUBLIC_`.
 
-## Later, with a domain (about $10/year)
-- Add the domain in Vercel, put **Cloudflare** (free) in front, and set `TRUST_CLOUDFLARE=1`.
-- Verify the domain with **Resend** and set `RESEND_API_KEY` and `RESEND_FROM_EMAIL`. This replaces Gmail for emails.
-- Update `NEXT_PUBLIC_APP_URL` and the phone's `EXPO_PUBLIC_API_URL` to the new domain.
-- Consider HSTS `preload` once the domain is only used for this app.
+## 5. Deploy and verify
 
-## Rolling back
-- Vercel: Deployments → promote the previous deployment.
-- Data: Settings → Data & sync → Restore from backup. It replaces the farm's records and keeps the logins.
+1. Select **Deploy** in Vercel. Once the first deployment succeeds, open its
+   production URL.
+2. Check that `https://<your-production-domain>/api/meta/version` returns JSON.
+3. Sign in and verify the dashboard, farm records, and animal photos. If you
+   migrated data, compare important totals with the backed-up source.
+4. Test a normal sign-in and sign-out. If password-reset email is required,
+   configure SMTP or Resend and test delivery.
+5. In Vercel, confirm the cron job is present and check its function logs after
+   its scheduled run. `apps/web/vercel.json` schedules it daily at 21:30 UTC.
+6. Keep a backup of the source database until you have verified production
+   data and established a regular backup routine.
+
+Vercel automatically creates Preview deployments for other branches and
+deploys the connected production branch (normally `main`) when changes are
+pushed. Do not point Preview deployments at production data unless that is
+intentional.
+
+## 6. Build and distribute the phone app
+
+The phone app is a separate Expo application. Vercel hosts the web app and its
+API; it does not create an installable Android APK or iOS app. EAS Build
+creates those phone builds in the cloud. Deploy the web app first so the phone
+app has a live API URL to use.
+
+1. Open `apps/mobile/eas.json` and replace
+   `https://REPLACE_WITH_PRODUCTION_URL` in both the `preview` and `production`
+   profiles with the real HTTPS Vercel URL, for example
+   `https://your-project.vercel.app`. Do not add a trailing slash.
+   `EXPO_PUBLIC_API_URL` is included in the app bundle, so it must be a public
+   URL, never a secret or database connection string.
+2. From the repository root in PowerShell, go to the mobile app and sign in to
+   Expo:
+
+   ```powershell
+   Set-Location apps\mobile
+   npx eas-cli@latest login
+   npx eas-cli@latest whoami
+   ```
+
+3. Link this Expo app to your Expo account. Run
+   `npx eas-cli@latest init` and follow the prompts to create or select the
+   `farm-manager-mobile` project. This adds the EAS project ID to the Expo app
+   configuration; keep that change in Git.
+4. Build an installable Android APK for yourself or testers:
+
+   ```powershell
+   npx eas-cli@latest build --profile preview --platform android
+   ```
+
+   When the build finishes, open the build URL from the command output on the
+   Android phone and install the APK. The `preview` profile in
+   `apps/mobile/eas.json` uses internal distribution, which produces an
+   installable Android APK.
+5. After testing, create the Android store build:
+
+   ```powershell
+   npx eas-cli@latest build --profile production --platform android
+   ```
+
+   This creates a production Android app bundle for Google Play. Upload it
+   using Google Play Console, or configure EAS Submit after setting up a Play
+   Developer account, Play app, and service account credentials. The
+   `submit.production.android` values in `apps/mobile/eas.json` are
+   placeholders until you configure those credentials.
+6. For iPhone, create a store build with
+   `npx eas-cli@latest build --profile production --platform ios`. Installing
+   on iPhones or distributing through the App Store requires Apple signing
+   credentials and an Apple Developer Program membership.
+
+After changing the production API URL, commit and push the changes. Vercel
+automatically redeploys the web app from the connected production branch;
+start a new EAS build separately to put the new URL into the phone app binary.
+The phone and website then use the same production API and Atlas database.
+
+## Rollback
+
+Use **Vercel → Deployments** to promote a previously successful deployment.
+Application rollback does not roll back database changes; keep database
+backups and review schema changes before deploying them.

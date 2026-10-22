@@ -65,3 +65,6 @@ next-env.d.ts
 
 # never commit captured cookies/tokens from manual testing
 *cookies*.txt
+
+.vercel
+.env*
