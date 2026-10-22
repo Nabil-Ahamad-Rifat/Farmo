@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+/*
+ * Farm Manager design tokens: a calm corporate look.
+ * - ink (navy-slate) for text and primary actions
+ * - brand: deep farm green for positive actions and the active nav
+ * - red and amber only for dues and warnings
+ * Tailwind turns each token into utilities: bg-brand-600, text-ink,
+ * border-line, shadow-card, rounded-card, bg-navy-900...
+ */
+@theme {
+  --color-ink: #0f172a;
+  --color-surface: #f6f8fa;
+  --color-line: #e2e8f0;
+
+  --color-brand-50: #ecfdf5;
+  --color-brand-100: #d1fae5;
+  --color-brand-200: #a7f3d0;
+  --color-brand-300: #6ee7b7;
+  --color-brand-400: #34d399;
+  --color-brand-500: #10b981;
+  --color-brand-600: #047857;
+  --color-brand-700: #065f46;
+  --color-brand-800: #064e3b;
+  --color-brand-900: #022c22;
+
+  --color-navy-700: #1e293b;
+  --color-navy-800: #131c2e;
+  --color-navy-900: #0b1220;
+  --color-navy-950: #070c17;
+
+  --radius-card: 0.875rem;
+  --radius-control: 0.625rem;
+
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.05);
+  --shadow-raised: 0 4px 16px -4px rgb(15 23 42 / 0.12), 0 2px 4px -2px rgb(15 23 42 / 0.06);
+  --shadow-pop: 0 24px 48px -12px rgb(15 23 42 / 0.28);
+}
+
+@theme inline {
+  --font-sans: var(--font-jakarta), var(--font-bengali), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+
+  body {
+    background: var(--color-surface);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* One clear keyboard focus style everywhere. */
+  :focus-visible {
+    outline: 2px solid var(--color-brand-600);
+    outline-offset: 2px;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  summary {
+    cursor: pointer;
+  }
+
+  ::selection {
+    background: var(--color-brand-100);
+    color: var(--color-brand-900);
+  }
+}
+
+/* Respect "reduce motion": keep the final state, drop the movement. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

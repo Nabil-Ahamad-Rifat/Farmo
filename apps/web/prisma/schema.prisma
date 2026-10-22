@@ -1,0 +1,477 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id               String   @id @default(auto()) @map("_id") @db.ObjectId
+  name             String
+  // Milk price per litre the sale form starts with for a customer who has no
+  // earlier milk sale. Null means the built-in default (see src/lib/settings.ts).
+  defaultMilkPrice Float?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  users            User[]
+  employees        Employee[]
+  cows             Cow[]
+  feedBatches      FeedBatch[]
+  sales            Sale[]
+  otherExpenses    OtherExpense[]
+  otherIncomes     OtherIncome[]
+  customers        Customer[]
+  payments         Payment[]
+  suppliers        Supplier[]
+  supplierPayments SupplierPayment[]
+  animalPhotos     AnimalPhoto[]
+  animalEvents     AnimalEvent[]
+  payRates         PayRate[]
+  absences         EmployeeAbsence[]
+  workEntries      WorkEntry[]
+  salaryPayments   SalaryPayment[]
+}
+
+model User {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  name         String
+  email        String   @unique
+  password     String?
+  googleId     String?  @unique
+  role         String   @default("owner")
+  // Bumped when the password is reset or the member is changed, so older logins stop working.
+  tokenVersion Int?
+  tenantId     String   @db.ObjectId
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  refreshTokens RefreshToken[]
+}
+
+// Mobile-only (the web app keeps its single 7-day cookie JWT). Opaque,
+// rotated on every use; reuse of an already-rotated token revokes the
+// whole chain (signals the token was stolen and replayed).
+model RefreshToken {
+  id         String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String    @db.ObjectId
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique
+  deviceInfo String?
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  replacedBy String?   @db.ObjectId
+  createdAt  DateTime  @default(now())
+}
+
+// Opt-in de-duplication for mutating requests replayed by the mobile app's
+// offline outbox after reconnecting. A request with no Idempotency-Key
+// header is unaffected — this only engages when a client sends one.
+// A Mongo TTL index on createdAt (~24-48h) should be added out-of-band
+// (Prisma's schema DSL has no TTL index syntax) so old rows self-expire.
+model IdempotencyKey {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  tenantId     String   @db.ObjectId
+  key          String
+  route        String
+  responseBody String
+  statusCode   Int
+  createdAt    DateTime @default(now())
+
+  @@unique([tenantId, route, key])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  token     String   @unique
+  email     String
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+// Request counters for rate limiting, shared by every server instance (an
+// in-memory Map doesn't work on serverless). One row per key and window;
+// a TTL index on expiresAt (scripts/db-indexes.mjs) deletes old windows.
+model RateLimit {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  key       String   @unique
+  count     Int      @default(0)
+  expiresAt DateTime
+}
+
+// Web sessions signed out before their JWT expired (by jti). Checked on every
+// request; a TTL index on expiresAt removes rows once the JWT would have expired.
+model RevokedSession {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  jti       String   @unique
+  expiresAt DateTime
+}
+
+// Chunks of a backup being restored, uploaded part by part (Vercel caps a
+// request at 4.5 MB) and applied together on commit. TTL on expiresAt cleans
+// up imports that were never finished.
+model ImportStage {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  tenantId  String   @db.ObjectId
+  jobId     String
+  part      Int
+  data      String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@unique([jobId, part])
+  @@index([tenantId, jobId])
+}
+
+// A worker. Monthly workers earn salary/30 for every day from joinDate (their
+// start date) to leftDate or today, except days marked absent; the rate for a
+// day comes from PayRate. Daily workers earn days x rate for each WorkEntry.
+// What they are owed is earned minus SalaryPayment (payments and write-offs).
+model Employee {
+  id        String    @id @default(auto()) @map("_id") @db.ObjectId
+  name      String
+  role      String
+  email     String?
+  phone     String?
+  salary    Float     @default(0) // current monthly salary (monthly workers)
+  joinDate  DateTime?
+  status    String    @default("active") // active | left (older: terminated, on_leave)
+  payType   String? // monthly | daily; null on older documents means monthly
+  dailyRate Float? // current day rate (daily workers)
+  leftDate  DateTime?
+  tenantId  String    @db.ObjectId
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  salaryPayments SalaryPayment[]
+  payRates       PayRate[]
+  absences       EmployeeAbsence[]
+  workEntries    WorkEntry[]
+}
+
+// Money given to a worker (kind "payment", any amount, any day) or an
+// advance written off as a loss after they left (kind "writeoff").
+// periodMonth/periodYear only exist on payments made before pay accounts.
+model SalaryPayment {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  employeeId  String   @db.ObjectId
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  tenantId    String?  @db.ObjectId
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id])
+  kind        String? // payment | writeoff; null on older documents means payment
+  amount      Float
+  periodMonth Int?
+  periodYear  Int?
+  note        String?
+  paidAt      DateTime @default(now())
+  createdAt   DateTime @default(now())
+  createdById String?  @db.ObjectId // who entered it (owner or manager)
+
+  @@index([tenantId, paidAt])
+}
+
+// A worker's pay from a day onwards. The newest row on or before a day applies.
+model PayRate {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  employeeId    String   @db.ObjectId
+  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  tenantId      String   @db.ObjectId
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  from          DateTime
+  monthlySalary Float?
+  dailyRate     Float?
+  createdAt     DateTime @default(now())
+
+  @@index([tenantId, employeeId])
+}
+
+// A day a monthly worker did not work (unpaid).
+model EmployeeAbsence {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  employeeId  String   @db.ObjectId
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  tenantId    String   @db.ObjectId
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  date        DateTime
+  note        String?
+  createdAt   DateTime @default(now())
+  createdById String?  @db.ObjectId // who entered it (owner or manager)
+
+  @@unique([employeeId, date])
+  @@index([tenantId])
+}
+
+// Work done by a daily worker: `days` (0.5 allowed) at the rate of that time.
+model WorkEntry {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  employeeId  String   @db.ObjectId
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  tenantId    String   @db.ObjectId
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  date        DateTime
+  days        Float
+  rate        Float
+  note        String?
+  createdAt   DateTime @default(now())
+  createdById String?  @db.ObjectId // who entered it (owner or manager)
+
+  @@index([tenantId, date])
+}
+
+// An animal. tagNumber is the "Cow ID" shown everywhere (auto-suggested as
+// C-001, C-002…, editable, unique per farm). Everything after status is
+// optional so documents from before the animal records keep working.
+model Cow {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  tagNumber     String
+  name          String
+  breed         String?
+  purchasePrice Float?
+  status        String   @default("active") // active | sold | dead
+  tenantId      String   @db.ObjectId
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  sales         Sale[]
+
+  gender       String? // female | male
+  category     String? // cow | heifer | calf | bull
+  birthDate    DateTime?
+  color        String?
+  source       String? // born | purchased
+  purchaseDate DateTime?
+  notes        String?
+  // The photo shown on cards; one of this animal's photos.
+  mainPhotoId  String?   @db.ObjectId
+  motherId     String?   @db.ObjectId
+  mother       Cow?      @relation("CowMother", fields: [motherId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  calves       Cow[]     @relation("CowMother")
+
+  photos      AnimalPhoto[]
+  events      AnimalEvent[]
+  createdById String?       @db.ObjectId // who entered it (owner or manager)
+
+  @@unique([tagNumber, tenantId])
+}
+
+// A photo of an animal, stored in the database itself (resized JPEG bytes,
+// about 150-300 KB) so it is backed up and moved together with the data.
+model AnimalPhoto {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  cowId     String   @db.ObjectId
+  cow       Cow      @relation(fields: [cowId], references: [id], onDelete: Cascade)
+  tenantId  String   @db.ObjectId
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  data      Bytes
+  mimeType  String   @default("image/jpeg")
+  width     Int?
+  height    Int?
+  size      Int
+  caption   String?
+  takenAt   DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, cowId])
+}
+
+// One line of an animal's history: vaccine, insemination (semen/AI),
+// pregnancy_check, calving, treatment, deworming, weight or other.
+model AnimalEvent {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  cowId       String    @db.ObjectId
+  cow         Cow       @relation(fields: [cowId], references: [id], onDelete: Cascade)
+  tenantId    String    @db.ObjectId
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  type        String
+  date        DateTime
+  // Vaccine name / bull or semen straw / treatment or medicine.
+  title       String?
+  // When the next dose is due (vaccine, deworming) — drives the reminders.
+  nextDueDate DateTime?
+  // Pregnancy check: positive | negative.
+  result      String?
+  // Weight in kg.
+  value       Float?
+  cost        Float?
+  // Calving: the calf added as its own animal.
+  calfId      String?   @db.ObjectId
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  createdById String?   @db.ObjectId // who entered it (owner or manager)
+
+  @@index([tenantId, cowId])
+  @@index([tenantId, type])
+}
+
+model FeedBatch {
+  id                String    @id @default(auto()) @map("_id") @db.ObjectId
+  name              String
+  quantity          Float
+  unitPrice         Float
+  remainingQuantity Float
+  tenantId          String    @db.ObjectId
+  tenant            Tenant    @relation(fields: [tenantId], references: [id])
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  // Purchase tracking. All optional: older batches have none of these and
+  // are treated as fully paid. For profit, a batch with coverDays spreads its
+  // cost over those days; one without counts in full on its purchase day.
+  // Usage records only move stock, never cost. With coverDays set, the batch is used up evenly over that many days from
+  // purchasedAt, and remainingQuantity only goes down for extra manual use
+  // (see feedSchedule in @farm/business-logic).
+  supplierId        String?   @db.ObjectId
+  supplier          Supplier? @relation(fields: [supplierId], references: [id])
+  coverDays         Int?
+  purchasedAt       DateTime?
+  // Cache recomputed by recomputeSupplier() in src/lib/payables.ts — never write directly.
+  paidAmount        Float?
+  payStatus         String? // "paid" | "partial" | "pending"
+
+  usages      FeedUsage[]
+  createdById String?     @db.ObjectId // who entered it (owner or manager)
+
+  @@index([tenantId, supplierId])
+}
+
+model FeedUsage {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  feedBatchId String    @db.ObjectId
+  feedBatch   FeedBatch @relation(fields: [feedBatchId], references: [id], onDelete: Cascade)
+  quantity    Float
+  usedAt      DateTime  @default(now())
+  note        String?
+  createdAt   DateTime  @default(now())
+}
+
+model Sale {
+  id           String    @id @default(auto()) @map("_id") @db.ObjectId
+  customerName String
+  amount       Float
+  status       String    @default("paid")
+  saleType     String    @default("general")
+  quantity     Float?
+  unitPrice    Float?
+  notes        String?
+  tenantId     String    @db.ObjectId
+  tenant       Tenant    @relation(fields: [tenantId], references: [id])
+  cowId        String?   @db.ObjectId
+  cow          Cow?      @relation(fields: [cowId], references: [id])
+  // Set for every sale made through the customer/dues flow. Legacy sales
+  // without a customer keep a hand-set status. For linked sales, paidAmount
+  // and status ("paid" | "partial" | "pending") are a cache recomputed by
+  // recomputeCustomer() in src/lib/receivables.ts — never write them directly.
+  customerId   String?   @db.ObjectId
+  customer     Customer? @relation(fields: [customerId], references: [id])
+  paidAmount   Float?    @default(0)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  createdById  String?   @db.ObjectId // who entered it (owner or manager)
+
+  @@index([tenantId, customerId])
+}
+
+model Customer {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  name      String
+  phone     String?
+  address   String?
+  notes     String?
+  type      String   @default("new") // "regular" | "new"
+  tenantId  String   @db.ObjectId
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sales    Sale[]
+  payments Payment[]
+
+  @@index([tenantId])
+}
+
+// Money received from a customer. Applied to that customer's sales oldest
+// first (see allocatePayments in @farm/business-logic); anything beyond the
+// total sold is advance credit for future sales.
+model Payment {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  customerId  String   @db.ObjectId
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  amount      Float
+  method      String   @default("cash") // cash | bkash | nagad | bank | other
+  note        String?
+  paidAt      DateTime @default(now())
+  tenantId    String   @db.ObjectId
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String?  @db.ObjectId // who entered it (owner or manager)
+
+  @@index([tenantId, customerId])
+}
+
+model Supplier {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  name      String
+  phone     String?
+  address   String?
+  notes     String?
+  tenantId  String   @db.ObjectId
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  feedBatches FeedBatch[]
+  payments    SupplierPayment[]
+
+  @@index([tenantId])
+}
+
+// Money paid to a supplier. Applied to their purchases oldest first, the same
+// way customer payments are; anything beyond the total bought is advance.
+model SupplierPayment {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  supplierId  String   @db.ObjectId
+  supplier    Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  amount      Float
+  method      String   @default("cash") // cash | bkash | nagad | bank | other
+  note        String?
+  paidAt      DateTime @default(now())
+  tenantId    String   @db.ObjectId
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String?  @db.ObjectId // who entered it (owner or manager)
+
+  @@index([tenantId, supplierId])
+}
+
+model OtherExpense {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  description String
+  amount      Float
+  category    String   @default("other")
+  expenseDate DateTime @default(now())
+  tenantId    String   @db.ObjectId
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String?  @db.ObjectId // who entered it (owner or manager)
+}
+
+model OtherIncome {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  description String
+  amount      Float
+  category    String   @default("other")
+  incomeDate  DateTime @default(now())
+  tenantId    String   @db.ObjectId
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String?  @db.ObjectId // who entered it (owner or manager)
+}
