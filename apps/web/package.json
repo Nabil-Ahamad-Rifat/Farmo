@@ -9,6 +9,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "db:check": "node scripts/check-db.mjs",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "postinstall": "prisma generate"
@@ -25,6 +26,7 @@
     "google-auth-library": "^11.0.2",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^1.28.0",
+    "mongoose": "^9.11.4",
     "next": "^16.4.2",
     "nodemailer": "^10.1.7",
     "react": "19.2.4",

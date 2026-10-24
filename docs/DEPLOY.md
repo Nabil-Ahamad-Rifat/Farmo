@@ -21,6 +21,37 @@ Fix any failures before continuing. Do not commit real environment files,
 database credentials, or generated secrets. The root `.gitignore` excludes
 `.env` files while allowing `.env.example` templates.
 
+To test the database URL that the web app will actually use for local
+development, including the read transaction required by Prisma, run:
+
+```bash
+npm run db:check --workspace=apps/web
+```
+
+The check prefers a shell-provided `DATABASE_URL`, then
+`apps/web/.env.local`, then `apps/web/.env`, matching Next.js's local
+environment-file precedence. It prints a success message only after Prisma
+receives a successful MongoDB ping and completes a read-only Prisma
+transaction; it never prints the URL or password. This checks database
+connectivity and transaction support without writing farm data.
+
+If the check reports `ReplicaSetNoPrimary` or a server-selection timeout:
+
+1. In Atlas, confirm the cluster is running and available (not paused or still
+   starting).
+2. Under **Security → Network Access**, add the public IP address of the
+   computer running the check. For Vercel, review the separate deployment
+   network requirements; local computer access does not prove Vercel can reach
+   Atlas.
+3. Under **Database Access**, confirm the database user is active and its
+   password matches the URL. URL-encode reserved password characters such as
+   `@` (`%40`).
+4. Confirm `DATABASE_URL` uses the Atlas `mongodb+srv://` host and the
+   intended database name. Do not add `directConnection=true` for an Atlas
+   replica set.
+5. Rerun `npm run db:check --workspace=apps/web`. Never paste the URL or
+   password into terminal screenshots, chat, or Git.
+
 ## 2. Create a production MongoDB database
 
 1. Create a MongoDB Atlas cluster and a database user for this app. Use a
