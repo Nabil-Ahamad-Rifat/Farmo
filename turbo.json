@@ -3,6 +3,27 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
+      "env": [
+        "DATABASE_URL",
+        "JWT_SECRET",
+        "NEXT_PUBLIC_APP_URL",
+        "CRON_SECRET",
+        "GOOGLE_CLIENT_ID",
+        "GOOGLE_CLIENT_SECRET",
+        "GOOGLE_IOS_CLIENT_ID",
+        "GOOGLE_ANDROID_CLIENT_ID",
+        "MOBILE_MIN_SUPPORTED_VERSION",
+        "MOBILE_LATEST_VERSION",
+        "MOBILE_FORCE_UPDATE_BELOW",
+        "SMTP_USER",
+        "SMTP_PASS",
+        "SMTP_HOST",
+        "SMTP_PORT",
+        "SMTP_FROM",
+        "RESEND_API_KEY",
+        "RESEND_FROM_EMAIL",
+        "TRUST_CLOUDFLARE"
+      ],
       "outputs": [".next/**", "!.next/cache/**"]
     },
     "dev": {

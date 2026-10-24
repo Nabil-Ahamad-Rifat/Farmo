@@ -1,15 +1,42 @@
-# Deploy the web app to Vercel
+# Farm Manager deploy guide
 
-This repository is an npm-workspaces monorepo. Deploy the Next.js web app from
-`apps/web`; it depends on shared packages in the repository root. The Vercel
-configuration at `apps/web/vercel.json` selects Next.js and schedules the
-daily cleanup job.
+এই guide-এ ধাপে ধাপে দেখানো হয়েছে কীভাবে **website/API Vercel-এ** এবং
+**Android/iPhone app Expo EAS-এ** চালু করবেন।
 
-## 1. Check the project before deploying
+## আগে পুরো বিষয়টা বুঝে নিন
 
-From the repository root, run:
+- **Vercel** website ও API চালায়।
+- **MongoDB Atlas** user, farm record, cow photo-সহ app-এর data রাখে।
+- **Expo EAS** Android APK/Play Store build এবং iPhone build তৈরি করে।
+- Phone app এবং website একই Vercel API ব্যবহার করতে পারে; তাই দুটোই একই
+  Atlas database-এর সঙ্গে কাজ করে।
+- Website-এর deploy আর phone app-এর build **আলাদা কাজ**। Vercel deploy করলে
+  আগে থেকে install করা phone app নিজে থেকে update হয় না।
 
-```bash
+## আপনার কাজের সহজ ক্রম
+
+1. Atlas database ও connection প্রস্তুত করুন।
+2. GitHub-এর `main` branch-এ code push করুন।
+3. Vercel-এ `apps/web` project হিসেবে import করে environment variables দিন।
+4. Deploy হওয়ার পর website ও database পরীক্ষা করুন।
+5. Website ঠিক থাকলে Expo EAS দিয়ে phone app build করুন।
+
+> **জরুরি নিরাপত্তা:** কোনো `.env` ফাইল, database URL, database password,
+> JWT secret বা API key GitHub-এ push করবেন না। আগে chat বা অন্য কোথাও
+> password প্রকাশিত হয়ে থাকলে সেটি Atlas-এ বদলে নতুন password ব্যবহার করুন।
+
+## ১. Computer-এ code পরীক্ষা করুন
+
+VS Code-এ project folder খুলে PowerShell terminal চালু করুন। Terminal অন্য
+কোনো folder-এ থাকলে repository root-এ যেতে:
+
+```powershell
+Set-Location (git rev-parse --show-toplevel)
+```
+
+Node.js 22 ব্যবহার করুন। এরপর dependencies install ও checks চালান:
+
+```powershell
 npm ci
 npm run typecheck
 npm run lint
@@ -17,230 +44,312 @@ npm run test
 npm run build --workspace=apps/web
 ```
 
-Fix any failures before continuing. Do not commit real environment files,
-database credentials, or generated secrets. The root `.gitignore` excludes
-`.env` files while allowing `.env.example` templates.
+কোনো command ব্যর্থ হলে error ঠিক না করে পরের ধাপে যাবেন না। Web build
+সফল মানে শুধু code build হয়েছে; এতে Vercel deploy বা phone APK build হয় না।
 
-To test the database URL that the web app will actually use for local
-development, including the read transaction required by Prisma, run:
+### Database connection পরীক্ষা
 
-```bash
+```powershell
 npm run db:check --workspace=apps/web
 ```
 
-The check prefers a shell-provided `DATABASE_URL`, then
-`apps/web/.env.local`, then `apps/web/.env`, matching Next.js's local
-environment-file precedence. It prints a success message only after Prisma
-receives a successful MongoDB ping and completes a read-only Prisma
-transaction; it never prints the URL or password. This checks database
-connectivity and transaction support without writing farm data.
+সফল হলে এমন বার্তা পাবেন:
 
-If the check reports `ReplicaSetNoPrimary` or a server-selection timeout:
+```text
+MongoDB Atlas connected successfully (ping and Prisma read transaction succeeded).
+```
 
-1. In Atlas, confirm the cluster is running and available (not paused or still
-   starting).
-2. Under **Security → Network Access**, add the public IP address of the
-   computer running the check. For Vercel, review the separate deployment
-   network requirements; local computer access does not prove Vercel can reach
-   Atlas.
-3. Under **Database Access**, confirm the database user is active and its
-   password matches the URL. URL-encode reserved password characters such as
-   `@` (`%40`).
-4. Confirm `DATABASE_URL` uses the Atlas `mongodb+srv://` host and the
-   intended database name. Do not add `directConnection=true` for an Atlas
-   replica set.
-5. Rerun `npm run db:check --workspace=apps/web`. Never paste the URL or
-   password into terminal screenshots, chat, or Git.
+এটি database connection ও Prisma transaction পরীক্ষা করে, কিন্তু কোনো farm
+data লেখে না। Check প্রথমে terminal-এর `DATABASE_URL`, তারপর
+`apps/web/.env.local`, তারপর `apps/web/.env` ব্যবহার করে।
 
-## 2. Create a production MongoDB database
+ব্যর্থ হলে Atlas-এ cluster চালু আছে কি না, **Security → Network Access**-এ
+আপনার computer-এর public IP অনুমোদিত কি না, এবং **Database Access**-এ
+database user সক্রিয় কি না দেখুন। Password-এ `@` থাকলে URL-এ `%40` লিখতে
+হয়। URL/password terminal screenshot, chat বা GitHub-এ দেবেন না।
 
-1. Create a MongoDB Atlas cluster and a database user for this app. Use a
-   unique, strong password and grant only the database permissions the app
-   needs.
-2. In Atlas **Network Access**, allow connections from Vercel. Vercel's
-   standard Hobby deployments do not have a fixed outbound IP; if you use
-   Atlas's `0.0.0.0/0` allowlist entry, restrict the database user as above and
-   keep its credentials private.
-3. Copy the Atlas connection string. Select the `farm_management` database and
-   include `maxPoolSize=5`, for example:
+## ২. MongoDB Atlas প্রস্তুত করুন
+
+1. MongoDB Atlas-এ cluster তৈরি বা চালু করুন। Cluster `Available` হওয়া পর্যন্ত
+   অপেক্ষা করুন।
+2. **Database Access** থেকে app-এর জন্য database user তৈরি করুন। শক্তিশালী,
+   অন্য কোথাও ব্যবহার না-করা password দিন; সম্ভব হলে permission শুধু
+   `farm_management` database-এ সীমাবদ্ধ রাখুন।
+3. **Security → Network Access**-এ network access configure করুন:
+   - Local computer থেকে test করতে computer-এর বর্তমান public IP add করুন।
+   - Vercel-এর জন্য আলাদা network access দরকার। আপনার Vercel plan-এ fixed
+     outbound IP না থাকলে Atlas allowlist সেটিং deploy-এর জন্য উপযুক্তভাবে
+     configure করতে হবে। `0.0.0.0/0` মানে যেকোনো IP address থেকে connection
+     করা যাবে—এটি ব্যবহার করলে database user-এর password শক্তিশালী রাখুন
+     এবং permission সীমিত করুন।
+4. Atlas **Connect → Drivers** থেকে connection string নিন। Database name
+   `farm_management` ও `maxPoolSize=5` দিন। Format:
 
    ```text
-   mongodb+srv://<user>:<password>@<cluster-host>/farm_management?retryWrites=true&w=majority&maxPoolSize=5
+   mongodb+srv://<user>:<URL-encoded-password>@<cluster-host>/farm_management?retryWrites=true&w=majority&maxPoolSize=5
    ```
 
-   URL-encode special characters in the username or password. Never put the
-   real connection string in Git, a public issue, or a chat message.
-4. Create a local `apps/web/.env` from `apps/web/.env.example` and put the Atlas
-   connection string in `DATABASE_URL`. This file is ignored by Git.
-5. From the repository root, create the database collections and indexes:
+   `<user>`, `<URL-encoded-password>`, `<cluster-host>`-এর জায়গায় আপনার Atlas
+   তথ্য বসবে। সম্পূর্ণ URL-টি কাউকে পাঠাবেন না।
+5. Project-এর `apps/web/.env.example` দেখে নিজের computer-এ
+   `apps/web/.env` তৈরি/আপডেট করে `DATABASE_URL`-এ Atlas URL রাখুন।
+   `.env` ও `.env.local` Git-এ commit করবেন না।
+   - **Local app-এ Atlas ব্যবহার করতে চাইলে** `apps/web/.env.local`-এর
+     `DATABASE_URL`-ও Atlas URL করুন: Next.js development-এ `.env.local`,
+     `.env`-এর চেয়ে আগে পড়ে। `.env.local`-এ `127.0.0.1` থাকলে app Atlas নয়,
+     computer-এর নিজের local MongoDB-তে connect করার চেষ্টা করবে।
+6. Atlas database-এ schema ও app-এর প্রয়োজনীয় index তৈরি করুন। Repository
+   root-এ command চালান:
 
-   ```bash
+   ```powershell
    npm exec --workspace=apps/web -- prisma db push
    node apps/web/scripts/db-indexes.mjs
    ```
 
-   The index script is safe to rerun. Do not run these commands against a
-   production database containing data you need to preserve without first
-   making a backup.
+   **আগে থেকেই গুরুত্বপূর্ণ data থাকলে** backup ছাড়া `prisma db push` চালাবেন
+   না। ভুল database-এ command চালালে data/schema বদলে যেতে পারে।
 
-### If you have existing farm data to move
+### পুরোনো local farm data Atlas-এ নিতে হলে
 
-Back up the source database first and keep it running until the move is
-verified. Set `TARGET_DATABASE_URL` in your local terminal to the Atlas URL,
-then run the copy script from the repository root:
+আগে source database backup করুন। এই migration ধাপ শুধু local data Atlas-এ
+নিতে চাইলে; নতুন, খালি database হলে এটি বাদ দিন।
 
-```bash
-# Dry run: inspect the records and totals that would be copied.
-node apps/web/scripts/copy-to-atlas.mjs
-
-# Copy, then verify record counts and money totals.
-node apps/web/scripts/copy-to-atlas.mjs --apply
-
-# Run the required Atlas indexes after the copy.
-node apps/web/scripts/db-indexes.mjs
-
-# Optional independent verification.
-node apps/web/scripts/copy-to-atlas.mjs --verify
-```
-
-In PowerShell, set the target without putting the URL into a committed file:
+PowerShell-এ repository root থেকে target URL-টি terminal environment-এ দিন:
 
 ```powershell
 $env:TARGET_DATABASE_URL = "mongodb+srv://..."
 ```
 
-The copy script uses the local database as its default source. Check its output
-and confirm that the target is the intended, empty production database before
-using `--apply`.
+এখানে `...`-এর জায়গায় আসল URL বসাবেন, কিন্তু সেটি terminal screenshot বা
+chat-এ share করবেন না। তারপর:
 
-## 3. Import the GitHub repository into Vercel
+```powershell
+# আগে শুধু কী copy হবে দেখে নিন; data copy হবে না
+node apps/web/scripts/copy-to-atlas.mjs
 
-1. Sign in at [vercel.com](https://vercel.com/) and choose **Add New → Project**.
-2. Connect GitHub and import `Nabil-Ahamad-Rifat/Farmo`. If it is not listed,
-   authorize the Vercel GitHub app to access that repository.
-3. In **Configure Project**, set:
-   - **Root Directory:** `apps/web`
-   - **Include files outside the Root Directory:** enabled, so the build can
-     access the root npm workspace files and `packages/*`.
-   - **Framework Preset:** Next.js
-   - **Node.js Version:** 22.x
-   - **Build Command**, **Output Directory**, and **Install Command:** use the
-     detected defaults.
-4. Add the production environment variables in the next section before the
-   first production deployment.
+# Target ঠিক ও খালি নিশ্চিত হওয়ার পরেই copy করুন
+node apps/web/scripts/copy-to-atlas.mjs --apply
 
-The `rootDirectory` setting is a Vercel project setting, not a supported
-`vercel.json` property. Keep `apps/web` as the Vercel project root so Vercel
-uses `apps/web/vercel.json` and its cron configuration.
+# Copy শেষে Atlas indexes তৈরি করুন
+node apps/web/scripts/db-indexes.mjs
 
-## 4. Add Vercel environment variables
+# চাইলে copy verify করুন
+node apps/web/scripts/copy-to-atlas.mjs --verify
+```
 
-In the Vercel project, open **Settings → Environment Variables**. Add the
-following to **Production** (and to Preview only if you configure a separate
-test database there):
+`--apply` চালানোর আগে output-এ source/target database ঠিক আছে কি না যাচাই
+করুন। Script target-এ আগে থেকেই farm থাকলে সাধারণত copy বন্ধ করে দেয়।
+পুরোনো database backup রেখে data মিলিয়ে না দেখা পর্যন্ত সেটি মুছবেন না।
 
-| Variable | Value |
+## ৩. পরিবর্তন GitHub-এ push করুন
+
+যে পরিবর্তন Vercel-এ deploy করতে চান, সেগুলো commit করে `main`-এ push করুন।
+আগে দেখে নিন কোনো `.env` stage হয়নি:
+
+```powershell
+git status --short
+```
+
+শুধু project code ও documentation stage করুন—`.env` নয়। উদাহরণ:
+
+```powershell
+git add apps/web/package.json package-lock.json apps/web/scripts/check-db.mjs docs/DEPLOY.md
+git commit -m "Prepare web app for Vercel deployment"
+git push origin main
+```
+
+যে ফাইলগুলো বদলেছেন শুধু সেগুলোই `git add`-এ দিন। `git status --short`-এ
+`.env` দেখা গেলে সেটি stage/push করবেন না।
+
+## ৪. Vercel-এ website project তৈরি করুন
+
+1. [Vercel Dashboard](https://vercel.com/dashboard)-এ login করুন।
+2. **Add New → Project** নির্বাচন করুন।
+3. GitHub connect করে `Nabil-Ahamad-Rifat/Farmo` repository import করুন।
+   Repository না দেখালে Vercel-এর GitHub app-কে ওই repository access দিন।
+4. **Configure Project**-এ নিচের settings দিন:
+
+   | Setting | কী নির্বাচন করবেন |
+   |---|---|
+   | Root Directory | `apps/web` |
+   | Include files outside the Root Directory | চালু / enabled |
+   | Framework Preset | Next.js |
+   | Node.js Version | `22.x` |
+   | Install Command | Vercel-এর detected default |
+   | Build Command | Vercel-এর detected default |
+   | Output Directory | Vercel-এর detected default |
+
+   `apps/web`-এর বাইরের files অন্তর্ভুক্ত করা জরুরি: web app root npm workspace
+   ও `packages/*`-এর shared code ব্যবহার করে। Root Directory Vercel Dashboard-এ
+   দিতে হয়—`vercel.json`-এ নয়। এই project-এর cron config
+   `apps/web/vercel.json`-এ আছে, তাই `apps/web`-ই project root রাখুন।
+   Vercel log-এ environment variable নিয়ে Turborepo warning দেখালে নিশ্চিত
+   করুন `turbo.json`-এর `build.env` list-এ সেই variable আছে। এই project-এর
+   প্রয়োজনীয় app variables list-এ আগে থেকেই যোগ করা আছে।
+
+5. Environment variables যোগ করার পর **Deploy** চাপুন।
+
+## ৫. Vercel-এ environment variables যোগ করুন
+
+Vercel project-এ **Settings → Environment Variables** খুলুন। প্রতিটি variable
+এর জন্য **Production** নির্বাচন করুন:
+
+| Name | কী value দেবেন |
 |---|---|
-| `DATABASE_URL` | Production Atlas connection string from step 2 |
-| `JWT_SECRET` | A new random secret, at least 32 characters |
-| `NEXT_PUBLIC_APP_URL` | The production URL, such as `https://your-project.vercel.app`, without a trailing slash |
-| `CRON_SECRET` | A new random secret, at least 16 characters |
+| `DATABASE_URL` | ধাপ ২-এর production Atlas connection string |
+| `JWT_SECRET` | নিচের command থেকে তৈরি নতুন secret |
+| `CRON_SECRET` | নিচের অন্য command থেকে তৈরি আলাদা secret |
+| `NEXT_PUBLIC_APP_URL` | `https://<আপনার-project>.vercel.app` — শেষে `/` দেবেন না |
 
-Generate secrets locally with Node.js; use a different secret for each
-variable:
+Secret আপনার নিজের PowerShell-এ তৈরি করুন:
 
-```bash
+```powershell
 node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"
 node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"
 ```
 
-Add the final Vercel production URL to `NEXT_PUBLIC_APP_URL` once the project
-URL is known. Optional variables such as Google OAuth and email/SMTP are
-documented in `apps/web/.env.example`; add them only if you configure those
-services. Leave `TRUST_CLOUDFLARE` unset unless Cloudflare actually proxies the
-site.
+প্রথম command-এর output `JWT_SECRET`; দ্বিতীয়টির output `CRON_SECRET`।
+দুটি secret একে অন্যের বদলে ব্যবহার করবেন না। Vercel value field-এ value
+paste করুন; `.env`-এর মতো quotation mark দেবেন না। Secret-গুলো chat বা GitHub-এ
+লিখবেন না।
 
-Set these values only in Vercel's environment-variable settings or in your
-ignored local `.env` file. Do not prefix secrets with `NEXT_PUBLIC_`.
+`NEXT_PUBLIC_APP_URL`-এ Vercel project-এর production URL দিন। URL নাম এখনো
+নির্দিষ্ট না হলে project name ঠিক করে পাওয়া URL ব্যবহার করুন; deploy-এর
+পরে URL বদলালে variable update করে আবার deploy দিন।
 
-## 5. Deploy and verify
+ঐচ্ছিক service—শুধু ব্যবহার করলে যোগ করুন:
 
-1. Select **Deploy** in Vercel. Once the first deployment succeeds, open its
-   production URL.
-2. Check that `https://<your-production-domain>/api/meta/version` returns JSON.
-3. Sign in and verify the dashboard, farm records, and animal photos. If you
-   migrated data, compare important totals with the backed-up source.
-4. Test a normal sign-in and sign-out. If password-reset email is required,
-   configure SMTP or Resend and test delivery.
-5. In Vercel, confirm the cron job is present and check its function logs after
-   its scheduled run. `apps/web/vercel.json` schedules it daily at 21:30 UTC.
-6. Keep a backup of the source database until you have verified production
-   data and established a regular backup routine.
+- Google login: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`; mobile Google
+  login-এর জন্য আলাদা iOS/Android client ID-ও লাগতে পারে।
+- Password reset email: Gmail/SMTP হলে `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`;
+  Gmail-এর সাধারণ password নয়, App Password ব্যবহার করুন।
+- Resend হলে `RESEND_API_KEY`, `RESEND_FROM_EMAIL` এবং verified domain লাগবে।
+- Cloudflare site-এর সামনে configure না করা পর্যন্ত `TRUST_CLOUDFLARE` ফাঁকা
+  রাখুন।
 
-Vercel automatically creates Preview deployments for other branches and
-deploys the connected production branch (normally `main`) when changes are
-pushed. Do not point Preview deployments at production data unless that is
-intentional.
+সমস্ত variable save করার পর deployment দিন। Environment variable পরিবর্তন
+আগের deployment-এ নিজে থেকে লাগু হয় না—পরিবর্তনের পরে **Redeploy** করতে হয়।
 
-## 6. Build and distribute the phone app
+## ৬. Vercel deploy ও status দেখা
 
-The phone app is a separate Expo application. Vercel hosts the web app and its
-API; it does not create an installable Android APK or iOS app. EAS Build
-creates those phone builds in the cloud. Deploy the web app first so the phone
-app has a live API URL to use.
+GitHub `main` branch connected থাকলে নতুন commit push করলে Vercel নিজে
+deployment শুরু করবে:
 
-1. Open `apps/mobile/eas.json` and replace
-   `https://REPLACE_WITH_PRODUCTION_URL` in both the `preview` and `production`
-   profiles with the real HTTPS Vercel URL, for example
-   `https://your-project.vercel.app`. Do not add a trailing slash.
-   `EXPO_PUBLIC_API_URL` is included in the app bundle, so it must be a public
-   URL, never a secret or database connection string.
-2. From the repository root in PowerShell, go to the mobile app and sign in to
-   Expo:
+```powershell
+git push origin main
+```
+
+তারপর Vercel project-এর **Deployments** tab খুলুন। নতুন deployment-এ
+`Building` থেকে `Ready` হলে deploy সফল। `Failed` হলে deployment খুলে
+**Build Logs**-এর একদম নিচের প্রথম আসল `Error` দেখুন। শুধু warning দেখে
+failure ধরে নেবেন না।
+
+GitHub auto deploy ব্যবহার না করে terminal থেকে deploy করতে চাইলে repository
+root-এ:
+
+```powershell
+npx vercel login
+npx vercel link --cwd apps/web
+npx vercel --prod --cwd apps/web
+```
+
+প্রথমবার login করুন, `link` prompt-এ সঠিক Vercel project বাছুন, এবং project
+settings-এ Root Directory `apps/web` আছে কি না নিশ্চিত করুন। পরের deploy-এ
+সাধারণত শুধু শেষ command-টি দরকার। **GitHub auto deploy অথবা CLI—একটি পথ
+বেছে নিলেই যথেষ্ট।**
+
+## ৭. Live website পরীক্ষা করুন
+
+1. Production URL খুলুন, যেমন `https://your-project.vercel.app`।
+2. `https://your-project.vercel.app/api/meta/version` খুলে JSON response
+   আসে কি না দেখুন।
+3. Login page খুলে দেখুন। Atlas-এ আগে থেকেই user থাকলে সেই account দিয়ে
+   login করুন।
+4. Registration পরীক্ষা করতে হলে কেবল test account ব্যবহার করুন। Register
+   করলে Atlas database-এ আসল user ও farm record লেখা হবে।
+5. Test farm-এ cow/customer record যোগ করুন, page reload করে record আছে কি
+   না দেখুন। Cow photo upload করে তা পুনরায় load হয় কি না পরীক্ষা করুন।
+   ছবিও `DATABASE_URL`-এর Atlas database-এর `AnimalPhoto` collection-এ
+   সংরক্ষিত হয়।
+6. Atlas-এ আগের farm data migrate করলে dashboard totals ও কয়েকটি record
+   source backup-এর সঙ্গে মিলিয়ে নিন।
+7. Password reset email দরকার হলে SMTP/Resend configure করে test করুন।
+8. **Vercel → Settings/Cron Jobs** বা project cron view-এ cleanup schedule
+   দেখুন। `apps/web/vercel.json`-এ এটি প্রতিদিন `21:30 UTC`-তে চলে।
+
+Atlas database-এ production data থাকলে test করার সময় delete/overwrite করবেন
+না। নিয়মিত database backup রাখুন। Vercel deployment rollback করলে code
+পেছনে যায়, database-এর পরিবর্তন স্বয়ংক্রিয়ভাবে rollback হয় না।
+
+## ৮. Phone app build করা
+
+Web site live হওয়ার পর phone app configure করুন। Vercel Android APK বা
+iPhone app build করে না; Expo EAS করে।
+
+1. `apps/mobile/eas.json` খুলুন। `preview` ও `production` profile-এ থাকা
+   `https://REPLACE_WITH_PRODUCTION_URL`-এর বদলে production Vercel URL দিন।
+   শেষে `/` নয়। এই public API URL app build-এর মধ্যে থাকবে—এখানে secret
+   বা database URL কখনো দেবেন না।
+2. PowerShell-এ repository root থেকে:
 
    ```powershell
-   Set-Location apps\mobile
+   cd apps\mobile
    npx eas-cli@latest login
    npx eas-cli@latest whoami
    ```
 
-3. Link this Expo app to your Expo account. Run
-   `npx eas-cli@latest init` and follow the prompts to create or select the
-   `farm-manager-mobile` project. This adds the EAS project ID to the Expo app
-   configuration; keep that change in Git.
-4. Build an installable Android APK for yourself or testers:
+3. প্রথমবার EAS project link করতে:
+
+   ```powershell
+   npx eas-cli@latest init
+   ```
+
+   Prompt অনুসারে Expo account-এ `farm-manager-mobile` project তৈরি/নির্বাচন
+   করুন। এতে app configuration-এ EAS project ID যুক্ত হবে; পরিবর্তনটি Git-এ
+   commit করুন।
+4. Android phone-এ install করে tester-দের দিয়ে দেখার জন্য APK build করুন:
 
    ```powershell
    npx eas-cli@latest build --profile preview --platform android
    ```
 
-   When the build finishes, open the build URL from the command output on the
-   Android phone and install the APK. The `preview` profile in
-   `apps/mobile/eas.json` uses internal distribution, which produces an
-   installable Android APK.
-5. After testing, create the Android store build:
+   Build শেষ হলে EAS build link Android phone-এ খুলে APK install করুন।
+5. Play Store-এর জন্য production Android build:
 
    ```powershell
    npx eas-cli@latest build --profile production --platform android
    ```
 
-   This creates a production Android app bundle for Google Play. Upload it
-   using Google Play Console, or configure EAS Submit after setting up a Play
-   Developer account, Play app, and service account credentials. The
-   `submit.production.android` values in `apps/mobile/eas.json` are
-   placeholders until you configure those credentials.
-6. For iPhone, create a store build with
-   `npx eas-cli@latest build --profile production --platform ios`. Installing
-   on iPhones or distributing through the App Store requires Apple signing
-   credentials and an Apple Developer Program membership.
+   Store-এ প্রকাশ করতে Google Play Developer account, Play Console-এ তৈরি
+   app, এবং signing/submission credentials লাগবে। `apps/mobile/eas.json`-এর
+   Android submit settings placeholder থাকতে পারে—submit করার আগে সেগুলো
+   configure করুন।
+6. iPhone App Store build:
 
-After changing the production API URL, commit and push the changes. Vercel
-automatically redeploys the web app from the connected production branch;
-start a new EAS build separately to put the new URL into the phone app binary.
-The phone and website then use the same production API and Atlas database.
+   ```powershell
+   npx eas-cli@latest build --profile production --platform ios
+   ```
+
+   Apple signing credentials ও Apple Developer Program membership লাগবে।
+
+API URL পরিবর্তনের পরে নতুন EAS build করতে হবে। Website-এর Vercel deploy
+করলেই আগে install করা phone app-এর bundled URL বদলায় না।
+
+## সমস্যা হলে দ্রুত কোথায় দেখবেন
+
+| লক্ষণ | কী পরীক্ষা করবেন |
+|---|---|
+| Vercel build-এ package/module missing | Root Directory `apps/web`, `Include files outside the Root Directory` enabled, lockfile push হয়েছে কি না |
+| `DATABASE_URL` missing/Prisma error | Vercel Production environment-এ `DATABASE_URL` যোগ, তারপর Redeploy |
+| Turbo warning: Vercel variable missing from `turbo.json` | `turbo.json`-এর web `build.env` allowlist-এ variable যোগ করে commit/push, তারপর Redeploy |
+| Atlas server-selection timeout | Cluster running, Atlas Network Access/IP allowlist, database user ও password |
+| `Transactions are not supported` | Prisma feature-এর জন্য replica-set support দরকার; standalone local MongoDB নয় |
+| Local app `127.0.0.1:27018` খোঁজে | `apps/web/.env.local` `.env`-কে override করছে; local URL বদলান বা local MongoDB চালান |
+| Phone app API-তে connect করতে পারে না | `eas.json`-এর production URL, HTTPS, এবং Vercel deployment `Ready` কি না |
+| Environment variable বদলেও পুরোনো আচরণ | নতুন Vercel Redeploy দিন; Expo public URL বদলালে নতুন EAS build করুন |
 
 ## Rollback
 
-Use **Vercel → Deployments** to promote a previously successful deployment.
-Application rollback does not roll back database changes; keep database
-backups and review schema changes before deploying them.
+Code rollback করতে Vercel **Deployments** থেকে আগের সফল deployment promote
+করুন। এটি database rollback নয়। Data/schema পরিবর্তনের আগে backup রাখুন,
+এবং rollback-এর পর live data আলাদাভাবে যাচাই করুন।
