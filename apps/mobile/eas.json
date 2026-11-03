@@ -9,20 +9,25 @@
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_API_URL": "http://localhost:3000"
-      }
+      },
+      "channel": "development"
     },
     "preview": {
       "distribution": "internal",
       "channel": "preview",
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://REPLACE_WITH_PRODUCTION_URL"
+        "EXPO_PUBLIC_API_URL": "https://farmo-zlb3.vercel.app",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "876975930083-i2mfbm0jmt3jvmhe4oetrfogsgs8u73q.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "876975930083-uson81li4sapg5rpb3i7khuafftqqila.apps.googleusercontent.com"
       }
     },
     "production": {
       "autoIncrement": true,
       "channel": "production",
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://REPLACE_WITH_PRODUCTION_URL"
+        "EXPO_PUBLIC_API_URL": "https://farmo-zlb3.vercel.app",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "876975930083-i2mfbm0jmt3jvmhe4oetrfogsgs8u73q.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "876975930083-uson81li4sapg5rpb3i7khuafftqqila.apps.googleusercontent.com"
       }
     }
   },
