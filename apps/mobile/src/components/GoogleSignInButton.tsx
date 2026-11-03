@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Pressable, ActivityIndicator } from 'react-native';
+import { Pressable, ActivityIndicator, View } from 'react-native';
 import { Text } from '@/src/components/ui/Text';
 import { isGoogleSignInConfigured, useGoogleAuthRequest } from '@/src/lib/googleAuth';
 import { useSession } from '@/src/context/AuthContext';
@@ -15,7 +15,15 @@ interface Props {
 // making this early return safe despite normally being a rules-of-hooks
 // violation.
 export function GoogleSignInButton({ onError }: Props) {
-  if (!isGoogleSignInConfigured) return null;
+  if (!isGoogleSignInConfigured) {
+    return (
+      <View className="mt-3 rounded-xl border border-line bg-slate-50 px-4 py-3">
+        <Text className="text-center text-sm text-slate-500">
+          Google sign-in is not configured for this build.
+        </Text>
+      </View>
+    );
+  }
   return <GoogleSignInButtonInner onError={onError} />;
 }
 
@@ -25,8 +33,14 @@ function GoogleSignInButtonInner({ onError }: Props) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (response?.type !== 'success') return;
-    const idToken = response.authentication?.idToken;
+    if (!response) return;
+    if (response.type === 'error') {
+      onError(response.error?.message || response.params.error_description || 'Google sign-in could not be completed.');
+      return;
+    }
+    if (response.type !== 'success') return;
+
+    const idToken = response.params.id_token || response.authentication?.idToken;
     if (!idToken) {
       onError('Google did not return a usable credential. Please try again.');
       return;
@@ -44,13 +58,34 @@ function GoogleSignInButtonInner({ onError }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [response]);
 
+  async function handlePress() {
+    onError('');
+    try {
+      const result = await promptAsync();
+      if (result.type === 'error') {
+        onError(result.error?.message || result.params.error_description || 'Google sign-in could not be completed.');
+      }
+    } catch (error) {
+      onError(error instanceof Error ? error.message : 'Google sign-in could not be started.');
+    }
+  }
+
   return (
     <Pressable
       disabled={!request || loading}
-      onPress={() => promptAsync()}
-      className="mt-3 flex-row items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3 disabled:opacity-50"
+      onPress={handlePress}
+      accessibilityRole="button"
+      accessibilityLabel="Continue with Google"
+      className="mt-3 min-h-12 flex-row items-center justify-center gap-2 rounded-xl border border-line bg-white px-4 py-3 disabled:opacity-50"
     >
-      {loading ? <ActivityIndicator color="white" /> : <Text className="text-sm font-semibold text-white">Continue with Google</Text>}
+      {loading || !request ? (
+        <ActivityIndicator color="#172033" />
+      ) : (
+        <>
+          <Text className="text-base font-bold text-blue-600">G</Text>
+          <Text className="text-sm font-semibold text-ink">Continue with Google</Text>
+        </>
+      )}
     </Pressable>
   );
 }

@@ -219,8 +219,18 @@ paste করুন; `.env`-এর মতো quotation mark দেবেন ন�
 
 ঐচ্ছিক service—শুধু ব্যবহার করলে যোগ করুন:
 
-- Google login: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`; mobile Google
-  login-এর জন্য আলাদা iOS/Android client ID-ও লাগতে পারে।
+- Google login:
+  - **Mobile Google login চালাতে হলে** Vercel-এ `GOOGLE_ANDROID_CLIENT_ID`
+    এবং `GOOGLE_CLIENT_ID` যোগ করুন। এগুলো `apps/mobile/eas.json`-এর
+    `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID` এবং
+    `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`-এর সঙ্গে একই Google Cloud OAuth client
+    ID হতে হবে। App ID build-এর সময় EAS-এ যায়; backend audience check-এর
+    জন্য Vercel-এও client ID লাগে।
+  - **Web Google login-ও চালালে** `GOOGLE_CLIENT_SECRET` যোগ করুন।
+    `GOOGLE_IOS_CLIENT_ID` iOS native login চালু করলে যোগ করুন।
+  - Android OAuth setup-এ app-এর package name `com.farmmanager.app` এবং
+    EAS signing key-এর SHA-1 fingerprint Google Cloud-এ configure থাকতে হবে।
+    Google Cloud OAuth credentials-এর type ও package/SHA-1 মিলতে হবে।
 - Password reset email: Gmail/SMTP হলে `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`;
   Gmail-এর সাধারণ password নয়, App Password ব্যবহার করুন।
 - Resend হলে `RESEND_API_KEY`, `RESEND_FROM_EMAIL` এবং verified domain লাগবে।

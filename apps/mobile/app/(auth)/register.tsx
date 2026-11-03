@@ -5,7 +5,6 @@ import { registerSchema } from '@farm/shared-validation';
 import { Text } from '@/src/components/ui/Text';
 import { useSession } from '@/src/context/AuthContext';
 import { GoogleSignInButton } from '@/src/components/GoogleSignInButton';
-import { isGoogleSignInConfigured } from '@/src/lib/googleAuth';
 import { Button, FormError, TextField } from '@/src/components/ui';
 import { AuthShell } from './_layout';
 
@@ -49,16 +48,14 @@ export default function RegisterScreen() {
         </View>
       ) : null}
 
-      {isGoogleSignInConfigured ? (
-        <View className="mt-6 gap-5">
-          <GoogleSignInButton onError={setError} />
-          <View className="flex-row items-center">
-            <View className="flex-1 border-t border-line" />
-            <Text className="mx-3 text-xs font-medium text-slate-500">or sign up with email</Text>
-            <View className="flex-1 border-t border-line" />
-          </View>
+      <View className="mt-6 gap-5">
+        <GoogleSignInButton onError={setError} />
+        <View className="flex-row items-center">
+          <View className="flex-1 border-t border-line" />
+          <Text className="mx-3 text-xs font-medium text-slate-500">or sign up with email</Text>
+          <View className="flex-1 border-t border-line" />
         </View>
-      ) : null}
+      </View>
 
       <View className="mt-6 gap-4">
         <TextField label="Full Name" value={name} onChangeText={setName} placeholder="e.g. Mohammad Karim" autoCapitalize="words" autoComplete="name" />
