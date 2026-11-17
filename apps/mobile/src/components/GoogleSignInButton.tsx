@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Pressable, ActivityIndicator, View } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
 import { Text } from '@/src/components/ui/Text';
 import { isGoogleSignInConfigured, useGoogleAuthRequest } from '@/src/lib/googleAuth';
 import { useSession } from '@/src/context/AuthContext';
@@ -17,7 +18,7 @@ interface Props {
 export function GoogleSignInButton({ onError }: Props) {
   if (!isGoogleSignInConfigured) {
     return (
-      <View className="mt-3 rounded-xl border border-line bg-slate-50 px-4 py-3">
+      <View className="min-h-12 items-center justify-center rounded-control border border-line bg-slate-50 px-4 py-3">
         <Text className="text-center text-sm text-slate-500">
           Google sign-in is not configured for this build.
         </Text>
@@ -76,16 +77,24 @@ function GoogleSignInButtonInner({ onError }: Props) {
       onPress={handlePress}
       accessibilityRole="button"
       accessibilityLabel="Continue with Google"
-      className="mt-3 min-h-12 flex-row items-center justify-center gap-2 rounded-xl border border-line bg-white px-4 py-3 disabled:opacity-50"
+      accessibilityState={{ disabled: !request || loading, busy: loading || !request }}
+      className="h-12 flex-row items-center justify-center gap-2 rounded-control border border-line bg-white px-4 disabled:opacity-60"
     >
-      {loading || !request ? (
-        <ActivityIndicator color="#172033" />
-      ) : (
-        <>
-          <Text className="text-base font-bold text-blue-600">G</Text>
-          <Text className="text-sm font-semibold text-ink">Continue with Google</Text>
-        </>
-      )}
+      <GoogleMark />
+      <Text className="text-sm font-semibold text-ink">Continue with Google</Text>
+      {loading || !request ? <ActivityIndicator size="small" color="#5f6368" /> : null}
     </Pressable>
+  );
+}
+
+function GoogleMark() {
+  return (
+    <Svg width={20} height={20} viewBox="0 0 48 48" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      <Path d="M24 5a19 19 0 0 1 19 19H24" fill="none" stroke="#4285F4" strokeWidth={7} />
+      <Path d="M43 24A19 19 0 0 1 24 43" fill="none" stroke="#34A853" strokeWidth={7} />
+      <Path d="M24 43A19 19 0 0 1 5 24" fill="none" stroke="#FBBC05" strokeWidth={7} />
+      <Path d="M5 24A19 19 0 0 1 24 5" fill="none" stroke="#EA4335" strokeWidth={7} />
+      <Path d="M24 24h19" fill="none" stroke="#4285F4" strokeWidth={7} />
+    </Svg>
   );
 }
