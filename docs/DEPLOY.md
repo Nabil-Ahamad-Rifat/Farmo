@@ -323,8 +323,16 @@ iPhone app build করে না; Expo EAS করে।
    npx eas-cli@latest build --profile preview --platform android
    ```
 
-   Build শেষ হলে EAS build link Android phone-এ খুলে APK install করুন।
-5. Play Store-এর জন্য production Android build:
+   এই profile প্রতিটি test build-এ Android version code বাড়ায় এবং installযোগ্য
+   APK তৈরি করে। Build শেষ হলে EAS build link Android phone-এ খুলে APK install
+   করুন। একই package-এর আগের build থাকলে uninstall না করেও update install
+   হওয়ার কথা।
+5. Test build হাতে পাওয়ার পর অন্তত এই flow-গুলো যাচাই করুন:
+   - Login, account creation, এবং Google sign-in।
+   - Keyboard খুলে login ও form-এর শেষ input-গুলো দেখা/স্ক্রল করা যায় কি না।
+   - Animal, sale, dues, customer/supplier, এবং expense-এর create/edit flow।
+   - App বন্ধ করে আবার খুললে login ও saved data ঠিক থাকে কি না।
+6. Play Store-এর জন্য production Android build:
 
    ```powershell
    npx eas-cli@latest build --profile production --platform android
@@ -334,7 +342,7 @@ iPhone app build করে না; Expo EAS করে।
    app, এবং signing/submission credentials লাগবে। `apps/mobile/eas.json`-এর
    Android submit settings placeholder থাকতে পারে—submit করার আগে সেগুলো
    configure করুন।
-6. iPhone App Store build:
+7. iPhone App Store build:
 
    ```powershell
    npx eas-cli@latest build --profile production --platform ios

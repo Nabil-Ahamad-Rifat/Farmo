@@ -13,7 +13,11 @@
       "channel": "development"
     },
     "preview": {
+      "autoIncrement": true,
       "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
       "channel": "preview",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://farmo-zlb3.vercel.app",
