@@ -223,9 +223,10 @@ paste করুন; `.env`-এর মতো quotation mark দেবেন ন�
   - **Mobile Google login চালাতে হলে** Vercel-এ `GOOGLE_ANDROID_CLIENT_ID`
     এবং `GOOGLE_CLIENT_ID` যোগ করুন। এগুলো `apps/mobile/eas.json`-এর
     `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID` এবং
-    `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`-এর সঙ্গে একই Google Cloud OAuth client
-    ID হতে হবে। App ID build-এর সময় EAS-এ যায়; backend audience check-এর
-    জন্য Vercel-এও client ID লাগে।
+    `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`-এর respective Google Cloud client ID-এর
+    সঙ্গে মিলতে হবে; Android ও Web client একই Google Cloud project-এ থাকতে
+    হবে। App IDs build-এর সময় EAS-এ যায়; backend audience check-এর জন্য
+    Vercel-এও client IDs লাগে। Profile-এ IDs বদলালে নতুন APK build করুন।
   - **Web Google login-ও চালালে** `GOOGLE_CLIENT_SECRET` যোগ করুন।
     `GOOGLE_IOS_CLIENT_ID` iOS native login চালু করলে যোগ করুন।
   - Android OAuth setup-এ app-এর package name `com.farmmanager.app` এবং
@@ -234,6 +235,9 @@ paste করুন; `.env`-এর মতো quotation mark দেবেন ন�
 - Password reset email: Gmail/SMTP হলে `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`;
   Gmail-এর সাধারণ password নয়, App Password ব্যবহার করুন।
 - Resend হলে `RESEND_API_KEY`, `RESEND_FROM_EMAIL` এবং verified domain লাগবে।
+- Password reset চেষ্টা করলে mail service বা production app URL configure না
+  থাকলে web ও mobile-এ এখন স্পষ্ট error দেখাবে। Configure করার পর Vercel-এ
+  redeploy দিয়ে web এবং phone—দুই জায়গা থেকেই reset link পরীক্ষা করুন।
 - Cloudflare site-এর সামনে configure না করা পর্যন্ত `TRUST_CLOUDFLARE` ফাঁকা
   রাখুন।
 

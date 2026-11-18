@@ -25,7 +25,7 @@ export function FormModal({
   const insets = useSafeAreaInsets();
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} className="flex-1 justify-end bg-navy-950/50">
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1 justify-end bg-navy-950/50">
         <Pressable className="flex-1" onPress={onClose} accessibilityLabel="Close" />
         <View className="max-h-[92%] rounded-t-2xl bg-white">
           <View className="flex-row items-start justify-between gap-3 border-b border-slate-100 px-5 pb-4 pt-5">

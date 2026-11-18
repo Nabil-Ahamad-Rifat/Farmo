@@ -1,21 +1,19 @@
 import { useState } from 'react';
-import { View, Pressable } from 'react-native';
+import { View, Pressable, Linking } from 'react-native';
 import { router } from 'expo-router';
 import { ArrowLeft, CheckCircle2 } from 'lucide-react-native';
 import { forgotPasswordSchema } from '@farm/shared-validation';
 import { Text } from '@/src/components/ui/Text';
-import { mobileApiClient } from '@/src/lib/apiClient';
+import { API_URL, mobileApiClient } from '@/src/lib/apiClient';
 import { Button, FormError, TextField } from '@/src/components/ui';
 import { colors } from '@/src/theme';
 import { AuthShell } from './_layout';
 
-// The reset link itself is emailed as a web URL (NEXT_PUBLIC_APP_URL/reset-password?token=...)
-// and completed on the web — this screen only requests that link, like the
-// web's Forgot password page.
 export default function ForgotPasswordScreen() {
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [sent, setSent] = useState(false);
+  const [devResetUrl, setDevResetUrl] = useState('');
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit() {
@@ -28,12 +26,25 @@ export default function ForgotPasswordScreen() {
 
     setLoading(true);
     try {
-      await mobileApiClient.post('/api/auth/forgot-password', { email: parsed.data.email }, 'Failed to process request');
+      const result = await mobileApiClient.post<{ devResetUrl?: string }>(
+        '/api/auth/forgot-password',
+        { email: parsed.data.email },
+        'Failed to process request'
+      );
+      setDevResetUrl(result.devResetUrl ?? '');
       setSent(true);
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function openDevelopmentResetLink() {
+    try {
+      await Linking.openURL(new URL(devResetUrl, API_URL).toString());
+    } catch {
+      setError('Could not open the reset page. Please try the link again from your development server.');
     }
   }
 
@@ -58,9 +69,21 @@ export default function ForgotPasswordScreen() {
           </View>
           <Text className="mt-4 text-xl font-bold text-ink">Check your email</Text>
           <Text className="mt-2 text-center text-sm text-slate-500">
-            If <Text className="font-medium text-ink">{email}</Text> is registered, you&apos;ll receive a password reset link within a few minutes.
+            {devResetUrl ? (
+              <>A reset link was generated for <Text className="font-medium text-ink">{email}</Text>.</>
+            ) : (
+              <>If <Text className="font-medium text-ink">{email}</Text> is registered, you&apos;ll receive a password reset link within a few minutes.</>
+            )}
           </Text>
-          <Text className="mt-3 text-center text-xs text-slate-500">Don&apos;t see it? Check your spam folder. The link expires in 30 minutes.</Text>
+          {devResetUrl ? (
+            <>
+              <Text className="mt-3 text-center text-xs text-amber-700">Email is not configured on this development server. Open the reset page directly:</Text>
+              {error ? <View className="mt-3 w-full"><FormError message={error} /></View> : null}
+              <Button label="Open Reset Page" size="md" onPress={openDevelopmentResetLink} className="mt-4 w-full" />
+            </>
+          ) : (
+            <Text className="mt-3 text-center text-xs text-slate-500">Don&apos;t see it? Check your spam folder. The link expires in 30 minutes.</Text>
+          )}
           {back}
         </View>
       ) : (

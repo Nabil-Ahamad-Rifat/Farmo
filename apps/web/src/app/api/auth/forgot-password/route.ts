@@ -3,7 +3,7 @@ import { forgotPasswordSchema } from '@farm/shared-validation';
 import { db } from '@/lib/db';
 import { generateResetToken } from '@/lib/auth/reset-token';
 import { checkRateLimit, getClientIp, tooManyRequests } from '@/lib/rate-limit';
-import { sendMail } from '@/lib/mail';
+import { mailConfigured, sendMail } from '@/lib/mail';
 
 export async function POST(req: NextRequest) {
   try {
@@ -22,6 +22,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ message: 'If that email exists, a reset link has been sent.' });
     }
 
+    const dev = process.env.NODE_ENV === 'development';
+    const configuredAppUrl = process.env.NEXT_PUBLIC_APP_URL
+      || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
+    let appUrl: string;
+    if (dev) {
+      appUrl = req.nextUrl.origin;
+    } else {
+      try {
+        const parsedAppUrl = new URL(configuredAppUrl);
+        if (parsedAppUrl.protocol !== 'https:' || !mailConfigured()) throw new Error('Password reset is not configured');
+        appUrl = parsedAppUrl.origin;
+      } catch {
+        console.error('Password reset is unavailable: configure NEXT_PUBLIC_APP_URL and an email service.');
+        return NextResponse.json({ error: 'Password reset is temporarily unavailable. Please contact support.' }, { status: 503 });
+      }
+    }
+
     // Always return success to avoid user enumeration attacks
     const user = await db.user.findUnique({ where: { email } });
     if (!user) {
@@ -29,15 +46,10 @@ export async function POST(req: NextRequest) {
     }
 
     const token = await generateResetToken(email);
-    // On the development machine the app runs on whatever address and port is
-    // free, so the link uses the address the page was opened on. In production
-    // only the configured URL is trusted (a Host header could be forged).
-    const dev = process.env.NODE_ENV === 'development';
-    const appUrl = dev ? req.nextUrl.origin : process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
     const resetUrl = `${appUrl}/reset-password?token=${token}`;
 
     const expires = new Date(Date.now() + 30 * 60 * 1000).toUTCString();
-    // A mail failure must not change the answer (that would reveal the account exists).
+    // Keep provider details out of the response; only surface a generic send failure.
     const sent = await sendMail({
       to: email,
       subject: 'Reset your Farm Manager password',
@@ -59,9 +71,6 @@ export async function POST(req: NextRequest) {
             <p style="color:#cbd5e1;font-size:11px;margin-top:4px">Link expires at ${expires}</p>
           </div>
         `,
-    }).catch((err) => {
-      console.error('Password reset email failed:', err);
-      return true;
     });
     if (!sent) {
       if (dev) {
@@ -72,7 +81,8 @@ export async function POST(req: NextRequest) {
         console.log(`\n=== PASSWORD RESET LINK (dev mode) ===\n${resetUrl}\n======================================\n`);
         return NextResponse.json({ message: 'Email is not set up on this computer.', devResetUrl: `/reset-password?token=${token}` });
       }
-      console.error('Password reset requested but no email service is configured (set SMTP_USER/SMTP_PASS or RESEND_API_KEY).');
+      console.error('Password reset email was not accepted by the configured email service.');
+      return NextResponse.json({ error: 'Password reset email could not be sent. Please try again later.' }, { status: 503 });
     }
 
     return NextResponse.json({ message: 'If that email exists, a reset link has been sent.' });
